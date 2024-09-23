@@ -654,8 +654,11 @@ void readFlashContents ()
   {
   if (!haveSDcard)
     {
-    Serial.println (F("*** No SD card detected."));
-    return;
+    display.clearDisplay();
+    display.setCursor(20, 20);
+    display.println("HUY");
+    display.display();
+    while(1){}
     }
 
   progressBarCount = 0;
@@ -664,33 +667,7 @@ void readFlashContents ()
   oldPage = NO_PAGE;
   byte lastMSBwritten = 0;
 
-  while (true)
-    {
-
-    Serial.println ();
-    Serial.println (F("Choose file to save as: "));
-
-    getline (name, sizeof name);
-    int len = strlen (name);
-
-    if (len < 5 || strcmp (&name [len - 4], ".HEX") != 0)
-      {
-      Serial.println (F("File name must end in .HEX"));
-      return;
-      }
-
-    // if file doesn't exist, proceed
-    if (!sd.vwd()->exists (name))
-      break;
-
-    Serial.print (F("File "));
-    Serial.print (name);
-    Serial.println (F(" exists. Overwrite? Type 'YES' to confirm ..."));
-
-    if (getYesNo ())
-      break;
-
-    }  // end of checking if file exists
+  char name[] = "firmware.hex";
 
   // ensure back in programming mode
   if (!startProgramming ())
@@ -699,23 +676,19 @@ void readFlashContents ()
   SdFile myFile;
 
   // open the file for writing
-  if (!myFile.open(name, O_WRITE | O_CREAT | O_TRUNC))
-    {
-    Serial.print (F("Could not open file "));
-    Serial.print (name);
-    Serial.println (F(" for writing."));
-    return;
-    }
+  if (!myFile.open(name, O_WRITE | O_CREAT | O_TRUNC)) return;
 
   byte memBuf [16];
   unsigned int i;
   char linebuf [50];
   byte sumCheck;
-
-  Serial.println (F("Copying flash memory to SD card (disk) ..."));
+  //Serial.println (F("Copying flash memory to SD card (disk) ..."));
 
   for (unsigned long address = 0; address < currentSignature.flashSize; address += sizeof memBuf)
     {
+    display.clearDisplay();
+    display.setCursor(10, 30);
+    display.println("copying...");
     bool allFF;
 
     unsigned long thisPage = address & pagemask;
@@ -760,7 +733,7 @@ void readFlashContents ()
     sumCheck = ~sumCheck + 1;
     // append sumcheck
     sprintf (&linebuf [(sizeof memBuf * 2) + 9] , "%02X\r\n",  sumCheck);
-
+    /*
     myFile.clearWriteError ();
     myFile.print (linebuf);
     if (myFile.getWriteError ())
@@ -770,17 +743,20 @@ void readFlashContents ()
        myFile.close ();
        return;
        }   // end of an error
+       */
 
     }  // end of reading flash
 
-  Serial.println ();  // finish off progress bar
-  myFile.print (":00000001FF\r\n");    // end of file record
-  myFile.close ();
+  myFile.print(":00000001FF\r\n");    // end of file record
+  myFile.close();
   // ensure written to disk
-  sd.vwd()->sync ();
-  Serial.print (F("File "));
-  Serial.print (name);
-  Serial.println (F(" saved."));
+  sd.vwd()->sync();
+  delay(1000);
+  display.clearDisplay();
+  display.setCursor(20,20);
+  display.println("File Saved");
+  display.display();
+  delay(500);
   }  // end of readFlashContents
 #endif
 
@@ -875,8 +851,10 @@ void initFile ()
 void showProgress ()
   {
   if (progressBarCount++ % 64 == 0)
-    Serial.println (); 
-  Serial.print (F("#"));  // progress bar
+    display.setCursor(0,26); 
+    display.println('#');
+    display.display();
+  //Serial.print (F("#"));  // progress bar
   }  // end of showProgress
   
 // clear entire temporary page to 0xFF in case we don't write to all of it 
@@ -1530,6 +1508,7 @@ bool updateFuses (const bool writeIt)
 int currentMenu = 0; // 0 - головне меню, 1 - підменю
 int currentSelection = 0;
 int fileSelection = 0;
+bool writing = false;
 int totalFiles = 5;  // Приклад, кількість файлів може змінюватись динамічно
 const char menuItems[3][10] = {"Read", "Verify", "Write"};
 const int pointerX = 0;
@@ -1546,7 +1525,21 @@ void displayHuy(){
 }
 
 void processClick(){
-  
+  if (currentMenu == 0){
+    switch (currentSelection) {
+    case 0:                   //  Read
+      readFlashContents();
+      break;
+    case 1:                   //  Verify
+      currentSelection = 1;
+      break;
+    case 2:                   //  Write
+      currentSelection = 1;
+      writing = true;
+      break;
+    }
+  }
+  //else writing? writeFlashContents() : verifyFlashContents();
 }
 
 void buttonPress(int sign = 1){
@@ -1568,6 +1561,10 @@ void showMainMenu(){
     display.println(menuItems[i]);
     textY+= 9;
   }
+}
+
+void showFileMenu(){
+  
 }
 
 #pragma endregion
@@ -1766,6 +1763,7 @@ void loop ()
   display.fillRoundRect(pointerX, pointerY, 128, 9, 3, WHITE);
 
   if (currentMenu == 0) showMainMenu();
+  else showFileMenu();
   display.display();
   /*
   Serial.println ();
