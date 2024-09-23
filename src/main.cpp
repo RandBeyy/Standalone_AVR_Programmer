@@ -1,6 +1,6 @@
 const bool allowTargetToRun = true;  // if true, programming lines are freed when not programming
 
-#define ALLOW_MODIFY_FUSES true   // make false if this sketch doesn't fit into memory
+#define ALLOW_MODIFY_FUSES false   // make false if this sketch doesn't fit into memory
 #define ALLOW_FILE_SAVING true    // make false if this sketch doesn't fit into memory
 #define SAFETY_CHECKS true        // check for disabling SPIEN, or enabling RSTDISBL
 
@@ -87,6 +87,14 @@ const unsigned int ENTER_PROGRAMMING_ATTEMPTS = 50;
 //#include "File_Utils.cpp"
 #include "HV_Serial_Utils.cpp"
 #include "HV_Parallel_Utils.cpp"
+#include <Wire.h>             // Include the Wire library for I2C communication 
+#include <Adafruit_GFX.h>     // Include the Adafruit GFX library 
+#include <Adafruit_SSD1306.h> // Include the specific OLED display library
+
+#define OLED_RESET    -1        // Define the reset pin for the OLED display (if applicable, -1 if unused)
+Adafruit_SSD1306 display(OLED_RESET);
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
 
 // target board reset goes to here
 const uint8_t RESET = 5;
@@ -1232,7 +1240,8 @@ void stopProgramming ()
 // called from setup()
 void initPins ()
   {
-
+  pinMode(2, INPUT);
+  pinMode(3, INPUT);
   // set up 8 MHz timer on pin 9
   pinMode (CLOCKOUT, OUTPUT);
   // set up Timer 1
@@ -1516,13 +1525,68 @@ bool updateFuses (const bool writeIt)
 
 #pragma endregion
 
+#pragma region Menu
+
+int currentMenu = 0; // 0 - головне меню, 1 - підменю
+int currentSelection = 0;
+int fileSelection = 0;
+int totalFiles = 5;  // Приклад, кількість файлів може змінюватись динамічно
+const char menuItems[3][10] = {"Read", "Verify", "Write"};
+const int pointerX = 0;
+int pointerY = 0;
+
+void displayHuy(){
+  display.clearDisplay();
+  display.setCursor(20, 20);
+  display.println("HUY");
+  display.display();
+  while(1){
+
+  }
+}
+
+void processClick(){
+  
+}
+
+void buttonPress(int sign = 1){
+  if (sign == 1){
+    int timeStart = millis();
+    while (digitalRead(2) == LOW) {
+      if ((millis() - timeStart) > 500) processClick();
+    }
+  }
+  pointerY+= 9*sign;
+  currentSelection+= 1*sign;
+}
+
+void showMainMenu(){
+    const int textX = 3;
+  int textY = 1;
+  for (int i = 0; i < 3; i++){
+    display.setCursor(textX, textY);
+    display.println(menuItems[i]);
+    textY+= 9;
+  }
+}
+
+#pragma endregion
+
+
+
 #pragma region Setup
 
 //------------------------------------------------------------------------------
 //      SETUP
 //------------------------------------------------------------------------------
+
 void setup ()
   {
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_INVERSE);
+  display.clearDisplay();
+  /*  
   Serial.begin(115200);
   while (!Serial) ;  // for Leonardo, Micro etc.
 
@@ -1533,8 +1597,8 @@ void setup ()
   Serial.print   (F("Version "));
   Serial.println (Version);
   Serial.println (F("Compiled on " __DATE__ " at " __TIME__ " with Arduino IDE " xstr(ARDUINO) "."));
-
-  initPins ();
+*/
+  initPins();
 
 #if SD_CARD_ACTIVE
   initFile ();
@@ -1542,6 +1606,7 @@ void setup ()
 
 }  // end of setup
 
+/*
 bool getYesNo ()
   {
   char response [5];
@@ -1549,9 +1614,11 @@ bool getYesNo ()
 
   return strcmp (response, "YES") == 0;
   }  // end of getYesNo
+  */
 
 void eraseFlashContents ()
   {
+    /*
   Serial.println (F("Erase all flash memory. ARE YOU SURE? Type 'YES' to confirm ..."));
 
   if (!getYesNo ())
@@ -1567,7 +1634,7 @@ void eraseFlashContents ()
   Serial.println (F("Erasing chip ..."));
   eraseMemory ();
   Serial.println (F("Flash memory erased."));
-
+*/
   }  // end of eraseFlashContents
 
 #if ALLOW_MODIFY_FUSES
@@ -1685,12 +1752,22 @@ void modifyFuses ()
 #pragma endregion
 
 
+
 #pragma region loop
 //------------------------------------------------------------------------------
 //      LOOP
 //------------------------------------------------------------------------------
 void loop ()
-{
+{ 
+  display.clearDisplay();
+
+  if (digitalRead(2) == LOW) buttonPress();
+  if (digitalRead(3) == LOW && currentSelection > 0) buttonPress(-1);
+  display.fillRoundRect(pointerX, pointerY, 128, 9, 3, WHITE);
+
+  if (currentMenu == 0) showMainMenu();
+  display.display();
+  /*
   Serial.println ();
   Serial.println (F("--------- Starting ---------"));
   Serial.println ();
@@ -1799,7 +1876,7 @@ void loop ()
       Serial.println (F("Unknown command."));
       break;
     }  // end of switch on command
-
+*/
 }  // end of loop
 
 #pragma endregion
