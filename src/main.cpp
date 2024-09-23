@@ -239,6 +239,7 @@ bool startProgramming ();
 void getline (char * buf, size_t bufsize);
 bool getYesNo ();
 uint8_t readFlash (unsigned long addr);
+void displayMessage(const char* message, int delayTime=400);
 
 #pragma endregion
 
@@ -654,11 +655,8 @@ void readFlashContents ()
   {
   if (!haveSDcard)
     {
-    display.clearDisplay();
-    display.setCursor(20, 20);
-    display.println("HUY");
-    display.display();
-    while(1){}
+    displayMessage("SD card not found");
+    return;
     }
 
   progressBarCount = 0;
@@ -683,7 +681,6 @@ void readFlashContents ()
   char linebuf [50];
   byte sumCheck;
   //Serial.println (F("Copying flash memory to SD card (disk) ..."));
-
   for (unsigned long address = 0; address < currentSignature.flashSize; address += sizeof memBuf)
     {
     display.clearDisplay();
@@ -694,7 +691,7 @@ void readFlashContents ()
     unsigned long thisPage = address & pagemask;
     // page changed? show progress
     if (thisPage != oldPage && oldPage != NO_PAGE)
-      showProgress ();
+      showProgress();
     // now this is the current page
     oldPage = thisPage;
 
@@ -752,11 +749,7 @@ void readFlashContents ()
   // ensure written to disk
   sd.vwd()->sync();
   delay(1000);
-  display.clearDisplay();
-  display.setCursor(20,20);
-  display.println("File Saved");
-  display.display();
-  delay(500);
+  displayMessage("File Saved");
   }  // end of readFlashContents
 #endif
 
@@ -1514,14 +1507,12 @@ const char menuItems[3][10] = {"Read", "Verify", "Write"};
 const int pointerX = 0;
 int pointerY = 0;
 
-void displayHuy(){
+void displayMessage(const char* message, int delayTime=400){
   display.clearDisplay();
-  display.setCursor(20, 20);
-  display.println("HUY");
+  display.setCursor(20, 14);
+  display.println(message);
   display.display();
-  while(1){
-
-  }
+  delay(delayTime);
 }
 
 void processClick(){
@@ -1531,9 +1522,11 @@ void processClick(){
       readFlashContents();
       break;
     case 1:                   //  Verify
+      displayMessage("WIP");
       currentSelection = 1;
       break;
     case 2:                   //  Write
+      displayMessage("WIP");
       currentSelection = 1;
       writing = true;
       break;
