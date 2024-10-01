@@ -87,14 +87,10 @@ const unsigned int ENTER_PROGRAMMING_ATTEMPTS = 50;
 //#include "File_Utils.cpp"
 #include "HV_Serial_Utils.cpp"
 #include "HV_Parallel_Utils.cpp"
-#include <Wire.h>             // Include the Wire library for I2C communication 
-#include <Adafruit_GFX.h>     // Include the Adafruit GFX library 
-#include <Adafruit_SSD1306.h> // Include the specific OLED display library
+#include <Wire.h>             // Include the Wire library for I2C communication
+#include <LiquidCrystal_I2C.h>
 
-#define OLED_RESET    -1        // Define the reset pin for the OLED display (if applicable, -1 if unused)
-Adafruit_SSD1306 display(OLED_RESET);
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Creates I2C LCD Object With (Address=0x27, Cols=20, Rows=4)
 
 // target board reset goes to here
 const uint8_t RESET = 5;
@@ -240,8 +236,13 @@ void getline (char * buf, size_t bufsize);
 bool getYesNo ();
 uint8_t readFlash (unsigned long addr);
 void displayMessage(const char* message, int delayTime=400);
+void getSignature ();
+void getFuseBytes ();
 
 #pragma endregion
+
+int progressBarCol = 0;
+
 
 #pragma region File_Utils
 
@@ -660,10 +661,12 @@ void readFlashContents ()
     }
 
   progressBarCount = 0;
+  progressBarCol = 0;
   pagesize = currentSignature.pageSize;
   pagemask = ~(pagesize - 1);
   oldPage = NO_PAGE;
   byte lastMSBwritten = 0;
+
 
   char name[] = "firmware.hex";
 
@@ -671,7 +674,11 @@ void readFlashContents ()
   if (!startProgramming ())
     return;
 
+  
+  getSignature ();
+  getFuseBytes ();
   SdFile myFile;
+
 
   // open the file for writing
   if (!myFile.open(name, O_WRITE | O_CREAT | O_TRUNC)) return;
@@ -681,11 +688,11 @@ void readFlashContents ()
   char linebuf [50];
   byte sumCheck;
   //Serial.println (F("Copying flash memory to SD card (disk) ..."));
+  lcd.clear();
   for (unsigned long address = 0; address < currentSignature.flashSize; address += sizeof memBuf)
     {
-    display.clearDisplay();
-    display.setCursor(10, 30);
-    display.println("copying...");
+    lcd.setCursor(0, 1);
+    lcd.print("copying...");
     bool allFF;
 
     unsigned long thisPage = address & pagemask;
@@ -839,27 +846,26 @@ void initFile ()
 #pragma endregion
 
 #pragma region Programming_Utils
-
+int counter = 0;
 // show one progress symbol, wrap at 64 characters
 void showProgress ()
   {
-  if (progressBarCount++ % 64 == 0)
-    display.setCursor(0,26); 
-    display.println('#');
-    display.display();
-  //Serial.print (F("#"));  // progress bar
+    Serial.println(progressBarCount);
+  if (progressBarCount++ % 64 == 0){
+    lcd.setCursor(progressBarCol++,2);
+    lcd.print('#');
   }  // end of showProgress
-  
-// clear entire temporary page to 0xFF in case we don't write to all of it 
+  }
+// clear entire temporary page to 0xFF in case we don't write to all of it
 void clearPage ()
 {
   unsigned int len = currentSignature.pageSize;
   for (unsigned int i = 0; i < len; i++)
     writeFlash (i, 0xFF);
 }  // end of clearPage
-  
 
-// write data to temporary buffer, ready for committing  
+
+// write data to temporary buffer, ready for committing
 void writeData (const unsigned long addr, const uint8_t * pData, const int length)
   {
   // write each uint8_t
@@ -874,16 +880,16 @@ void writeData (const unsigned long addr, const uint8_t * pData, const int lengt
     // put uint8_t into work buffer
     writeFlash (addr + i, pData [i]);
     }  // end of for
-    
+
 #if HIGH_VOLTAGE_PARALLEL || HIGH_VOLTAGE_SERIAL
   // if we finished on odd uint8_t force out last page latch
   if (((addr + length) & 1) == 1)
     writeFlash (addr + length, 0xFF);
-#endif // HIGH_VOLTAGE_PARALLEL    
+#endif // HIGH_VOLTAGE_PARALLEL
 
   }  // end of writeData
-  
- 
+
+
 // show a uint8_t in hex with leading zero and optional newline
 void showHex (const uint8_t b, const bool newline, const bool show0x)
   {
@@ -1362,37 +1368,30 @@ void verifyData (const unsigned long addr, const uint8_t * pData, const int leng
 
 
 void getSignature ()
-  {
+{
   foundSig = -1;
+  lastAddressMSB = 0;
 
-  uint8_t sig [3];
-  Serial.print (F("Signature = "));
-
-  readSignature (sig);
-  for (uint8_t i = 0; i < 3; i++)
-    showHex (sig [i]);
-
-  Serial.println ();
+  byte sig [3];
+  for (byte i = 0; i < 3; i++)
+  {
+    sig [i] = program (readSignatureByte, 0, i);
+  }  // end for each signature byte
 
   for (unsigned int j = 0; j < NUMITEMS (signatures); j++)
-    {
+  {
     memcpy_P (&currentSignature, &signatures [j], sizeof currentSignature);
 
     if (memcmp (sig, currentSignature.sig, sizeof sig) == 0)
-      {
+    {
       foundSig = j;
-      Serial.print (F("Processor = "));
-      Serial.println (currentSignature.desc);
-      Serial.print (F("Flash memory size = "));
-      Serial.print (currentSignature.flashSize, DEC);
-      Serial.println (F(" bytes."));
+      // make sure extended address is zero to match lastAddressMSB variable
+      program (loadExtendedAddressByte, 0, 0);
       return;
-      }  // end of signature found
-    }  // end of for each signature
+    }  // end of signature found
+  }  // end of for each signature
 
-  Serial.println (F("Unrecogized signature."));
-  }  // end of getSignature
-
+}  // end of getSignature
 void getFuseBytes ()
   {
   fuses [lowFuse]   = readFuse (lowFuse);
@@ -1508,10 +1507,10 @@ const int pointerX = 0;
 int pointerY = 0;
 
 void displayMessage(const char* message, int delayTime=400){
-  display.clearDisplay();
-  display.setCursor(20, 14);
-  display.println(message);
-  display.display();
+  lcd.clear();
+  int column = (20 - strlen(message)) / 2; 
+  lcd.setCursor(column, 1);
+  lcd.print(message);
   delay(delayTime);
 }
 
@@ -1539,25 +1538,24 @@ void buttonPress(int sign = 1){
   if (sign == 1){
     int timeStart = millis();
     while (digitalRead(2) == LOW) {
-      if ((millis() - timeStart) > 500) processClick();
+      if ((millis() - timeStart) > 1000) processClick();
     }
   }
-  pointerY+= 9*sign;
-  currentSelection+= 1*sign;
+  currentSelection+= sign;
+  lcd.clear();
 }
 
 void showMainMenu(){
-    const int textX = 3;
-  int textY = 1;
+  int textRow = 0;
+  const int textColumn = 1;
   for (int i = 0; i < 3; i++){
-    display.setCursor(textX, textY);
-    display.println(menuItems[i]);
-    textY+= 9;
+    lcd.setCursor(textColumn, textRow++);
+    lcd.print(menuItems[i]);
   }
 }
 
 void showFileMenu(){
-  
+
 }
 
 #pragma endregion
@@ -1572,11 +1570,9 @@ void showFileMenu(){
 
 void setup ()
   {
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_INVERSE);
-  display.clearDisplay();
-  /*  
+  Serial.begin(115200);
+  lcd.init();
+  /*
   Serial.begin(115200);
   while (!Serial) ;  // for Leonardo, Micro etc.
 
@@ -1588,7 +1584,17 @@ void setup ()
   Serial.println (Version);
   Serial.println (F("Compiled on " __DATE__ " at " __TIME__ " with Arduino IDE " xstr(ARDUINO) "."));
 */
-  initPins();
+  if (!startProgramming ())
+      {
+      Serial.println (F("Halted."));
+      stopProgramming ();
+      while  (true)
+        {}
+      }  // end of could not enter programming mode
+
+    getSignature ();
+    getFuseBytes ();
+    initPins();
 
 #if SD_CARD_ACTIVE
   initFile ();
@@ -1748,32 +1754,18 @@ void modifyFuses ()
 //      LOOP
 //------------------------------------------------------------------------------
 void loop ()
-{ 
-  display.clearDisplay();
+{
 
   if (digitalRead(2) == LOW) buttonPress();
   if (digitalRead(3) == LOW && currentSelection > 0) buttonPress(-1);
-  display.fillRoundRect(pointerX, pointerY, 128, 9, 3, WHITE);
+  lcd.setCursor(0,currentSelection);
+  lcd.print('*');
 
   if (currentMenu == 0) showMainMenu();
   else showFileMenu();
-  display.display();
+  
+
   /*
-  Serial.println ();
-  Serial.println (F("--------- Starting ---------"));
-  Serial.println ();
-
-  if (!startProgramming ())
-    {
-    Serial.println (F("Halted."));
-    stopProgramming ();
-    while  (true)
-      {}
-    }  // end of could not enter programming mode
-
-  getSignature ();
-  getFuseBytes ();
-
   // don't have signature? don't proceed
   if (foundSig == -1)
     {
