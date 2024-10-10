@@ -238,10 +238,14 @@ uint8_t readFlash (unsigned long addr);
 void displayMessage(const char* message, int delayTime=400);
 void getSignature ();
 void getFuseBytes ();
+bool chooseInputFile();
+void showFileMenu();
 
 #pragma endregion
 
 int progressBarCol = 0;
+int currentMenu = 0; // 0 - головне меню, 1 - підменю
+int currentSelection = 0;
 
 
 #pragma region File_Utils
@@ -539,6 +543,33 @@ bool readHexFile (const char * fName, const byte action)
   return false;
 }  // end of readHexFile
 
+char firmwareFiles[11][MAX_FILENAME];
+
+void getFirmwareFiles(){
+  if (!haveSDcard)
+    {
+    Serial.println (F("*** No SD card detected."));
+    displayMessage("No SD card detected");
+    return;
+    }
+  SdFile file;
+  char name[MAX_FILENAME];
+  
+
+  sd.vwd()->rewind();
+  int count = 0;
+  while (file.openNext(sd.vwd(), O_READ) && count < 10) {
+    file.getFilename(name);
+    byte len = strlen (name);
+    if (len > 4 && strcmp (&name [len - 4], ".HEX") == 0)
+      {
+        strcpy(firmwareFiles[count], name);
+      count+=1;
+      }
+      file.close();
+    }
+    firmwareFiles[count][0] = '\0';
+}
 
 void showDirectory ()
   {
@@ -576,20 +607,6 @@ void showDirectory ()
       Serial.print (buf);
       Serial.print (F(" bytes."));
 
-      dir_t d;
-      if (!file.dirEntry(&d))
-        Serial.println(F("Failed to find file date/time."));
-      else if (d.creationDate != FAT_DEFAULT_DATE)
-        {
-        Serial.print(F("  Created: "));
-        file.printFatDate(&Serial, d.creationDate);
-        Serial.print(F(" "));
-        file.printFatTime(&Serial, d.creationTime);
-        Serial.print(F(".  Modified: "));
-        file.printFatDate(&Serial, d.lastWriteDate);
-        Serial.print(F(" "));
-        file.printFatTime(&Serial, d.lastWriteTime);
-        }  // end of got date/time from directory
       Serial.println ();
       }
     file.close();
@@ -602,16 +619,7 @@ char lastFileName [MAX_FILENAME] = { 0 };
 
 bool chooseInputFile ()
   {
-  Serial.println ();
-  Serial.print (F("Choose disk file [ "));
-  Serial.print (lastFileName);
-  Serial.println (F(" ] ..."));
-
-  getline (name, sizeof name);
-
-  // no name? use last one
-  if (name [0] == 0)
-    memcpy (name, lastFileName, sizeof name);
+  strcpy(name,firmwareFiles[currentSelection]);
 
   if (readHexFile(name, checkFile))
     {
@@ -619,16 +627,6 @@ bool chooseInputFile ()
     return true;  // error, don't attempt to write
     }
 
-  // remember name for next time
-  memcpy (lastFileName, name, sizeof lastFileName);
-
-  char fileNameInEEPROM [MAX_FILENAME];
-  eeprom_read_block (&fileNameInEEPROM, LAST_FILENAME_LOCATION_IN_EEPROM, MAX_FILENAME);
-  fileNameInEEPROM [MAX_FILENAME - 1] = 0;  // ensure terminating null
-
-  // save new file name if it changed from what we have saved
-  if (strcmp (fileNameInEEPROM, lastFileName) != 0)
-    eeprom_write_block ((const void *) &lastFileName, LAST_FILENAME_LOCATION_IN_EEPROM, MAX_FILENAME);
 
   // check file would fit into device memory
   if (highestAddress > currentSignature.flashSize)
@@ -651,6 +649,117 @@ bool chooseInputFile ()
    return false;
   }  // end of chooseInputFile
 
+/*
+#if ALLOW_FILE_SAVING
+void readFlashContents ()
+  {
+  if (!haveSDcard)
+    {
+    Serial.println (F("*** No SD card detected."));
+    return;
+    }
+
+  progressBarCount = 0;
+  pagesize = currentSignature.pageSize;
+  pagemask = ~(pagesize - 1);
+  oldPage = NO_PAGE;
+  byte lastMSBwritten = 0;
+
+  char name[] = "firmware.hex";
+
+  // ensure back in programming mode
+  if (!startProgramming ())
+    return;
+
+  SdFile myFile;
+
+  // open the file for writing
+  if (!myFile.open(name, O_WRITE | O_CREAT | O_TRUNC))
+    {
+    Serial.print (F("Could not open file "));
+    Serial.print (name);
+    Serial.println (F(" for writing."));
+    return;
+    }
+
+  byte memBuf [16];
+  unsigned int i;
+  char linebuf [50];
+  byte sumCheck;
+
+  Serial.println (F("Copying flash memory to SD card (disk) ..."));
+
+  for (unsigned long address = 0; address < currentSignature.flashSize; address += sizeof memBuf)
+    {
+    bool allFF;
+
+    unsigned long thisPage = address & pagemask;
+    // page changed? show progress
+    if (thisPage != oldPage && oldPage != NO_PAGE)
+      showProgress ();
+    // now this is the current page
+    oldPage = thisPage;
+
+    // don't write lines that are all 0xFF
+    allFF = true;
+
+    for (i = 0; i < sizeof memBuf; i++)
+      {
+      memBuf [i] = readFlash (address + i);
+      if (memBuf [i] != 0xFF)
+        allFF = false;
+      }  // end of reading 16 bytes
+    if (allFF)
+      continue;
+
+    byte MSB = address >> 16;
+    if (MSB != lastMSBwritten)
+      {
+      sumCheck = 2 + 2 + (MSB << 4);
+      sumCheck = ~sumCheck + 1;
+      // hexExtendedSegmentAddressRecord (02)
+      sprintf (linebuf, ":02000002%02X00%02X\r\n", MSB << 4, sumCheck);
+      myFile.print (linebuf);
+      lastMSBwritten = MSB;
+      }  // end if different MSB
+
+    sumCheck = 16 + lowByte (address) + highByte (address);
+    sprintf (linebuf, ":10%04X00", (unsigned int) address & 0xFFFF);
+    for (i = 0; i < sizeof memBuf; i++)
+      {
+      sprintf (&linebuf [(i * 2) + 9] , "%02X",  memBuf [i]);
+      sumCheck += memBuf [i];
+      }  // end of reading 16 bytes
+
+    // 2's complement
+    sumCheck = ~sumCheck + 1;
+    // append sumcheck
+    sprintf (&linebuf [(sizeof memBuf * 2) + 9] , "%02X\r\n",  sumCheck);
+
+    myFile.clearWriteError ();
+    myFile.print (linebuf);
+    if (myFile.getWriteError ())
+       {
+       Serial.println ();  // finish off progress bar
+       Serial.println (F("Error writing file."));
+       myFile.close ();
+       return;
+       }   // end of an error
+
+    }  // end of reading flash
+
+  Serial.println ();  // finish off progress bar
+  myFile.print (":00000001FF\r\n");    // end of file record
+  myFile.close ();
+  // ensure written to disk
+  sd.vwd()->sync ();
+  Serial.print (F("File "));
+  Serial.print (name);
+  Serial.println (F(" saved."));
+  }  // end of readFlashContents
+#endif
+*/
+
 #if ALLOW_FILE_SAVING
 void readFlashContents ()
   {
@@ -668,15 +777,12 @@ void readFlashContents ()
   byte lastMSBwritten = 0;
 
 
-  char name[] = "firmware.hex";
+  char name[] = "firm.hex";
 
   // ensure back in programming mode
-  if (!startProgramming ())
+  if (!startProgramming())
     return;
 
-  
-  getSignature ();
-  getFuseBytes ();
   SdFile myFile;
 
 
@@ -689,10 +795,11 @@ void readFlashContents ()
   byte sumCheck;
   //Serial.println (F("Copying flash memory to SD card (disk) ..."));
   lcd.clear();
+  lcd.setCursor(0, 1);
+  lcd.print("copying...");
+  lcd.setCursor(0,2);
   for (unsigned long address = 0; address < currentSignature.flashSize; address += sizeof memBuf)
     {
-    lcd.setCursor(0, 1);
-    lcd.print("copying...");
     bool allFF;
 
     unsigned long thisPage = address & pagemask;
@@ -737,7 +844,7 @@ void readFlashContents ()
     sumCheck = ~sumCheck + 1;
     // append sumcheck
     sprintf (&linebuf [(sizeof memBuf * 2) + 9] , "%02X\r\n",  sumCheck);
-    /*
+    
     myFile.clearWriteError ();
     myFile.print (linebuf);
     if (myFile.getWriteError ())
@@ -747,7 +854,7 @@ void readFlashContents ()
        myFile.close ();
        return;
        }   // end of an error
-       */
+       
 
     }  // end of reading flash
 
@@ -755,19 +862,22 @@ void readFlashContents ()
   myFile.close();
   // ensure written to disk
   sd.vwd()->sync();
-  delay(1000);
+  Serial.println("FokinSaved");
   displayMessage("File Saved");
+  showDirectory();
   }  // end of readFlashContents
 #endif
 
-void writeFlashContents ()
+void writeFlashContents()
   {
   if (!haveSDcard)
     {
-    Serial.println (F("*** No SD card detected."));
+    Serial.println(F("*** No SD card detected."));
+    displayMessage("*** No SD card detected.");
     return;
     }
-
+  currentMenu = 1;
+  showFileMenu();
   if (chooseInputFile ())
     return;
 
@@ -846,16 +956,14 @@ void initFile ()
 #pragma endregion
 
 #pragma region Programming_Utils
-int counter = 0;
 // show one progress symbol, wrap at 64 characters
 void showProgress ()
   {
-    Serial.println(progressBarCount);
-  if (progressBarCount++ % 64 == 0){
-    lcd.setCursor(progressBarCol++,2);
+    if (progressBarCount++ % 64 == 0)
+    Serial.println (); 
+    Serial.print (F("#"));  // progress bar
     lcd.print('#');
   }  // end of showProgress
-  }
 // clear entire temporary page to 0xFF in case we don't write to all of it
 void clearPage ()
 {
@@ -1497,14 +1605,13 @@ bool updateFuses (const bool writeIt)
 
 #pragma region Menu
 
-int currentMenu = 0; // 0 - головне меню, 1 - підменю
-int currentSelection = 0;
 int fileSelection = 0;
 bool writing = false;
 int totalFiles = 5;  // Приклад, кількість файлів може змінюватись динамічно
 const char menuItems[3][10] = {"Read", "Verify", "Write"};
 const int pointerX = 0;
 int pointerY = 0;
+bool waitForWrite = false;
 
 void displayMessage(const char* message, int delayTime=400){
   lcd.clear();
@@ -1512,6 +1619,7 @@ void displayMessage(const char* message, int delayTime=400){
   lcd.setCursor(column, 1);
   lcd.print(message);
   delay(delayTime);
+  lcd.clear();
 }
 
 void processClick(){
@@ -1522,27 +1630,47 @@ void processClick(){
       break;
     case 1:                   //  Verify
       displayMessage("WIP");
-      currentSelection = 1;
       break;
     case 2:                   //  Write
-      displayMessage("WIP");
-      currentSelection = 1;
+      writeFlashContents();
+      currentSelection = 0;
       writing = true;
       break;
     }
   }
+  else{
+    waitForWrite = false;
+  }
   //else writing? writeFlashContents() : verifyFlashContents();
 }
-
+int timeStart;
 void buttonPress(int sign = 1){
   if (sign == 1){
-    int timeStart = millis();
+    timeStart = 0;
+    timeStart = millis();
     while (digitalRead(2) == LOW) {
-      if ((millis() - timeStart) > 1000) processClick();
+      int time = millis() - timeStart;
+      if ((time) > 1000) {
+        processClick();
+        return; 
+      }
     }
   }
+  else while(digitalRead(3) == LOW);
   currentSelection+= sign;
-  lcd.clear();
+}
+
+void waitForButtonPress(){
+  while(true){
+  if (digitalRead(2) == LOW){
+    buttonPress();
+    return;
+    }
+  if (digitalRead(3) == LOW && currentSelection > 0){
+    buttonPress(-1);
+    return;
+    }
+  }
 }
 
 void showMainMenu(){
@@ -1555,11 +1683,24 @@ void showMainMenu(){
 }
 
 void showFileMenu(){
+  int row;
+  waitForWrite = true;
+  while (waitForWrite){
+    lcd.clear();
+    row = 0;
+    while (firmwareFiles[row][0] != '\0'){
+      lcd.setCursor(1, row);
+      lcd.print(firmwareFiles[row]);
+      row++;
+    }
+    lcd.setCursor(0,currentSelection);
+    lcd.print('*');
+    waitForButtonPress();
 
+}
 }
 
 #pragma endregion
-
 
 
 #pragma region Setup
@@ -1599,6 +1740,7 @@ void setup ()
 #if SD_CARD_ACTIVE
   initFile ();
 #endif // SD_CARD_ACTIVE
+  getFirmwareFiles();
 
 }  // end of setup
 
@@ -1748,24 +1890,29 @@ void modifyFuses ()
 #pragma endregion
 
 
-
 #pragma region loop
 //------------------------------------------------------------------------------
 //      LOOP
 //------------------------------------------------------------------------------
 void loop ()
 {
-
-  if (digitalRead(2) == LOW) buttonPress();
-  if (digitalRead(3) == LOW && currentSelection > 0) buttonPress(-1);
+  lcd.clear();
   lcd.setCursor(0,currentSelection);
   lcd.print('*');
-
-  if (currentMenu == 0) showMainMenu();
-  else showFileMenu();
-  
-
+  showMainMenu();
+  waitForButtonPress();
   /*
+if (once){
+  if (!startProgramming ())
+    {
+    Serial.println (F("Halted."));
+    stopProgramming ();
+    while  (true)
+      {}
+    }  // end of could not enter programming mode
+
+  getSignature ();
+  getFuseBytes ();
   // don't have signature? don't proceed
   if (foundSig == -1)
     {
@@ -1774,7 +1921,10 @@ void loop ()
     while  (true)
       {}
     }  // end of no signature
-
+    once=false;
+}
+*/
+/*
  // ask for verify or write
   Serial.println (F("Actions:"));
   Serial.println (F(" [E] erase flash"));
