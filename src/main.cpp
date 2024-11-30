@@ -1,7 +1,7 @@
 const bool allowTargetToRun = true;  // if true, programming lines are freed when not programming
 
 #define ALLOW_MODIFY_FUSES false   // make false if this sketch doesn't fit into memory
-#define ALLOW_FILE_SAVING true    // make false if this sketch doesn't fit into memory
+#define ALLOW_FILE_SAVING false    // make false if this sketch doesn't fit into memory
 #define SAFETY_CHECKS true        // check for disabling SPIEN, or enabling RSTDISBL
 
 #define USE_ETHERNET_SHIELD false  // Use the Arduino Ethernet Shield for the SD card
@@ -142,7 +142,7 @@ const uint8_t CLOCKOUT = 9;
 
   Connect SD card like this:
 
-    D10: S S   (chip select)
+    D10: SS   (chip select)
     D11: MOSI (DI - data into SD card)
     D12: MISO (DO - data out from SD card)
     D13: SCK  (CLK - clock)
@@ -1325,8 +1325,8 @@ void stopProgramming ()
 // called from setup()
 void initPins ()
   {
-  pinMode(2, INPUT);
-  pinMode(3, INPUT);
+  pinMode(2, INPUT);                // DOWN
+  pinMode(3, INPUT);                // UP
   // set up 8 MHz timer on pin 9
   pinMode (CLOCKOUT, OUTPUT);
   // set up Timer 1
@@ -1623,24 +1623,7 @@ void displayMessage(const char* message, int delayTime=400){
 }
 
 void processClick(){
-  if (currentMenu == 0){
-    switch (currentSelection) {
-    case 0:                   //  Read
-      readFlashContents();
-      break;
-    case 1:                   //  Verify
-      displayMessage("WIP");
-      break;
-    case 2:                   //  Write
-      writeFlashContents();
-      currentSelection = 0;
-      writing = true;
-      break;
-    }
-  }
-  else{
     waitForWrite = false;
-  }
   //else writing? writeFlashContents() : verifyFlashContents();
 }
 int timeStart;
@@ -1896,11 +1879,7 @@ void modifyFuses ()
 //------------------------------------------------------------------------------
 void loop ()
 {
-  lcd.clear();
-  lcd.setCursor(0,currentSelection);
-  lcd.print('*');
-  showMainMenu();
-  waitForButtonPress();
+  writeFlashContents();
   /*
 if (once){
   if (!startProgramming ())
