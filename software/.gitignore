@@ -3,9 +3,3 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-ICSP_Utils.cpp
-File_Utils.cpp
-HV_Serial_Utils.cpp
-HV_Parallel_Utils.cpp
-SdFat
-manufacture

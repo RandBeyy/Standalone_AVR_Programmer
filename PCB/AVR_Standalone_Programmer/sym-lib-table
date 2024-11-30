@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "74LVC125APW")(type "KiCad")(uri "/home/randbey/Downloads/ul_74LVC125APW/KiCADv6/2024-11-05_20-39-49.kicad_sym")(options "")(descr ""))
+  (lib (name "SD_Card")(type "Legacy")(uri "/media/Files/Projects/Diploma/PCB/MSD-3-A/MSD-3-A.lib")(options "")(descr ""))
+)
