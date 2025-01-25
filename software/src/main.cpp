@@ -1277,7 +1277,8 @@ bool startProgramming ()
       if (timeout++ >= ENTER_PROGRAMMING_ATTEMPTS)
         {
         Serial.println ();
-        Serial.println (F("Failed to enter programming mode. Double-check wiring!"));
+        displayMessage("Please put MCU in", 40000);
+        //Serial.println (F("Failed to enter programming mode. Double-check wiring!"));
         return false;
         }  // end of too many attempts
       }  // end of not entered programming mode
@@ -1694,8 +1695,10 @@ void showFileMenu(){
 
 void setup ()
   {
-  Serial.begin(115200);
   lcd.init();
+  displayMessage("Start");
+  delay(1000);
+  lcd.clear();
   /*
   Serial.begin(115200);
   while (!Serial) ;  // for Leonardo, Micro etc.
